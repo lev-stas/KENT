@@ -2,11 +2,11 @@
 
 ### KENT (Kubernetes Events Notifier) is a minimalistic Kubernetes events exporter.
 
-At this stage, KENT ships events to [VictoriaLogs] (https://docs.victoriametrics.com/victorialogs/), but its architecture allows for adding other log storage systems in the future.
+At this stage, KENT ships events to [VictoriaLogs](https://docs.victoriametrics.com/victorialogs/), but its architecture allows for adding other log storage systems in the future.
 
 ### Why KENT?
 
-At [Ivinco] (https://www.ivinco.com), we regularly deal with complex infrastructure and monitoring challenges.
+At [Ivinco](https://www.ivinco.com), we regularly deal with complex infrastructure and monitoring challenges.
 While solving one of them, we came up with the idea of creating a tool that would be:
 
 - Simple to configure – no dozens of parameters that never work in practice.
