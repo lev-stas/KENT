@@ -1,0 +1,45 @@
+replicaCount: 1
+
+image:
+  repository: staslevchenko/kent
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+
+serviceAccount:
+  name: kent-exporter
+
+rbac:
+  create: true
+
+config:
+  logger:
+    level: info
+
+  kubernetes:
+    include_namespaces: []
+    exclude_namespaces: []
+
+  victorialogs:
+    enabled: true
+    endpoint: "http://vlogs.domain.com:9429"
+    clusterID: "k8s-prod"
+    accountID: "10"
+    projectID: "10"
+    batchSize: 500
+    flushTime: "30s"
+    timeout: "10s"
+    extraFields: {}
+    streamFields: ["k8s.namespace"]
+
+  health:
+    port: 8080
+
+extraEnv: []

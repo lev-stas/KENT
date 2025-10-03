@@ -1,0 +1,15 @@
+# Go
+/bin/
+/build/
+/dist/
+*.exe
+*.out
+*.test
+*.log
+
+# IDE
+.idea/
+.vscode/
+
+# Helm / Kubernetes
+*.tgz
