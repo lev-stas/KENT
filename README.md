@@ -42,11 +42,17 @@ helm upgrade --install -n monitoring -f values.yaml kent .
 
 #### Project Structure
 `cmd/` – entrypoint (main.go)
+
 `internal/app/` – application orchestration
+
 `internal/adapters/` – adapters for Kubernetes and log storage (currently VictoriaLogs)
+
 `internal/usecase/` – business logic (collecting and delivering events)
+
 `internal/domain/` – core entities (Event, LogEntry)
+
 `internal/http/` – health endpoints
+
 `deploy/chart/` – Helm chart for deployment
 
 #### License
