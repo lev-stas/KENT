@@ -8,7 +8,7 @@ package app
 
 import (
 	"context"
-	"event_exporter/internal/adapters/kubernetes"
+	k8sfetcher "event_exporter/internal/adapters/kubernetes"
 	"event_exporter/internal/adapters/victorialogs"
 	"event_exporter/internal/config"
 	httpserver "event_exporter/internal/http"
@@ -17,16 +17,26 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
 func Run(ctx context.Context, cfg config.Config) error {
 	log := logger.New(cfg.Logger.Level)
 
-	fetcher, err := kubernetes.NewFetcher(
-		log,
-		cfg.Kubernetes.IncludeNamespaces,
-		cfg.Kubernetes.ExcludeNamespaces,
-	)
+	restCfg, err := rest.InClusterConfig()
+	if err != nil {
+		return fmt.Errorf("app: cannot build in-cluster config; fallback to core/v1: %w", err)
+	}
+
+	cs, err := kubernetes.NewForConfig(restCfg)
+	if err != nil {
+		return fmt.Errorf("app: cannot create kube client; fallback to core/v1: %w", err)
+	}
+
+	fetcher, err := chooseFetcher(ctx, log, cfg.Kubernetes.IncludeNamespaces, cfg.Kubernetes.ExcludeNamespaces, cs)
 
 	if err != nil {
 		return fmt.Errorf("app: failed to init fetcher: %w", err)
@@ -58,7 +68,13 @@ func Run(ctx context.Context, cfg config.Config) error {
 
 	collector := usecase.NewCollector(fetcher, writers, log)
 
-	healthSvs := httpserver.NewHealthServer(cfg.HealthConfig.Port, fetcher)
+	var ready httpserver.ReadyChecker
+
+	if rc, ok := fetcher.(httpserver.ReadyChecker); ok {
+		ready = rc
+	}
+
+	healthSvs := httpserver.NewHealthServer(cfg.HealthConfig.Port, ready)
 
 	go func() {
 		if err := healthSvs.Start(); err != nil && err != http.ErrServerClosed {
@@ -88,4 +104,45 @@ func Run(ctx context.Context, cfg config.Config) error {
 	log.Info(context.Background(), "app: shutdown complete")
 
 	return nil
+}
+
+func chooseFetcher(
+	ctx context.Context,
+	log logger.Logger,
+	include []string,
+	exclude []string,
+	client *kubernetes.Clientset,
+) (usecase.EventFetcher, error) {
+
+	ok, err := supportsEventsV1(client)
+	if err != nil {
+		log.Warn(ctx, "app: events API detection failed; fallback to core/v1", "error", err)
+		return k8sfetcher.NewFetcher(log, include, exclude, client)
+	}
+
+	if !ok {
+		log.Info(ctx, "app: events.k8s.io/v1 not available; using core/v1/events")
+		return k8sfetcher.NewFetcher(log, include, exclude, client)
+	}
+
+	log.Info(ctx, "app: using events.k8s.io/v1 API for event collection")
+	return k8sfetcher.NewFetcherV1(log, include, exclude, client)
+}
+
+func supportsEventsV1(dc discovery.DiscoveryInterface) (bool, error) {
+	groupList, err := dc.ServerGroups()
+	if err != nil {
+		return false, err
+	}
+
+	for _, g := range groupList.Groups {
+		if g.Name == "events.k8s.io" {
+			for _, v := range g.Versions {
+				if v.Version == "v1" {
+					return true, nil
+				}
+			}
+		}
+	}
+	return false, nil
 }

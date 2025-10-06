@@ -103,7 +103,7 @@ func convertEventToLogEntry(e *domain.Event) (*domain.LogEntry, error) {
 	logType := "event" //Hardcoded type. In future may be several types.
 
 	return domain.NewLogEntry(
-		e.FirstTimestamp(),
+		e.EventTime(),
 		level,
 		logType,
 		e.Message(),
