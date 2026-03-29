@@ -2,7 +2,7 @@ replicaCount: 1
 
 image:
   repository: staslevchenko/kent
-  tag: "0.1.0"
+  tag: "0.2.0"
   pullPolicy: IfNotPresent
 
 resources:
@@ -38,6 +38,9 @@ config:
     timeout: "10s"
     extraFields: {}
     streamFields: ["k8s.namespace"]
+
+  stdout:
+    enabled: false
 
   health:
     port: 8080

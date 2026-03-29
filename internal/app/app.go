@@ -9,6 +9,7 @@ package app
 import (
 	"context"
 	k8sfetcher "event_exporter/internal/adapters/kubernetes"
+	stdoutwriter "event_exporter/internal/adapters/stdout"
 	"event_exporter/internal/adapters/victorialogs"
 	"event_exporter/internal/config"
 	httpserver "event_exporter/internal/http"
@@ -42,28 +43,9 @@ func Run(ctx context.Context, cfg config.Config) error {
 		return fmt.Errorf("app: failed to init fetcher: %w", err)
 	}
 
-	victoriaLogConfig := victorialogs.VictoriaLogsConfig{
-		Enabled:      cfg.VictoriaLogs.Enabled,
-		Endpoint:     cfg.VictoriaLogs.Endpoint,
-		ClusterID:    cfg.VictoriaLogs.ClusterID,
-		AccountID:    cfg.VictoriaLogs.AccountID,
-		ProjectID:    cfg.VictoriaLogs.ProjectID,
-		BatchSize:    cfg.VictoriaLogs.BatchSize,
-		FlushTime:    cfg.VictoriaLogs.FlushTime,
-		ExtraFields:  cfg.VictoriaLogs.ExtraFields,
-		Timeout:      cfg.VictoriaLogs.Timeout,
-		StreamFields: cfg.VictoriaLogs.StreamFields,
-	}
-
-	var writers []usecase.LogWriter
-
-	victoriaWriter, err := victorialogs.NewWriter(victoriaLogConfig, log)
+	writers, stopWriters, err := buildWriters(cfg, log)
 	if err != nil {
-		return fmt.Errorf("app: failed to init victorialogs writer: %w", err)
-	}
-
-	if victoriaWriter != nil {
-		writers = append(writers, victoriaWriter)
+		return err
 	}
 
 	collector := usecase.NewCollector(fetcher, writers, log)
@@ -97,13 +79,65 @@ func Run(ctx context.Context, cfg config.Config) error {
 		log.Error(context.Background(), "app: failed to stop health server", "error", err)
 	}
 
-	if victoriaWriter != nil {
-		victoriaWriter.Stop()
-	}
+	stopWriters()
 
 	log.Info(context.Background(), "app: shutdown complete")
 
 	return nil
+}
+
+func buildWriters(cfg config.Config, log logger.Logger) ([]usecase.LogWriter, func(), error) {
+	var (
+		writers  []usecase.LogWriter
+		stoppers []func()
+	)
+
+	register := func(writer usecase.LogWriter) {
+		if writer == nil {
+			return
+		}
+
+		writers = append(writers, writer)
+
+		if stopper, ok := writer.(interface{ Stop() }); ok {
+			stoppers = append(stoppers, stopper.Stop)
+		}
+	}
+
+	victoriaWriter, err := victorialogs.NewWriter(victorialogs.VictoriaLogsConfig{
+		Enabled:      cfg.VictoriaLogs.Enabled,
+		Endpoint:     cfg.VictoriaLogs.Endpoint,
+		ClusterID:    cfg.VictoriaLogs.ClusterID,
+		AccountID:    cfg.VictoriaLogs.AccountID,
+		ProjectID:    cfg.VictoriaLogs.ProjectID,
+		BatchSize:    cfg.VictoriaLogs.BatchSize,
+		FlushTime:    cfg.VictoriaLogs.FlushTime,
+		ExtraFields:  cfg.VictoriaLogs.ExtraFields,
+		Timeout:      cfg.VictoriaLogs.Timeout,
+		StreamFields: cfg.VictoriaLogs.StreamFields,
+	}, log)
+	if err != nil {
+		return nil, nil, fmt.Errorf("app: failed to init victorialogs writer: %w", err)
+	}
+	if victoriaWriter != nil {
+		register(victoriaWriter)
+	}
+
+	stdoutWriter, err := stdoutwriter.NewWriter(stdoutwriter.Config{
+		Enabled: cfg.Stdout.Enabled,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("app: failed to init stdout writer: %w", err)
+	}
+	if stdoutWriter != nil {
+		register(stdoutWriter)
+	}
+
+	return writers, func() {
+		for _, stop := range stoppers {
+			stop()
+		}
+	}, nil
 }
 
 func chooseFetcher(

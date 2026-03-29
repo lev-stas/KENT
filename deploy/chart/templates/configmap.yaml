@@ -26,5 +26,7 @@ data:
       timeout: {{ .Values.config.victorialogs.timeout | quote }}
       extra_fields: {{ .Values.config.victorialogs.extraFields | toJson }}
       stream_fields: {{ .Values.config.victorialogs.streamFields | toJson }}
+    stdout:
+      enabled: {{ .Values.config.stdout.enabled }}
     health:
       port: {{ .Values.config.health.port }}
