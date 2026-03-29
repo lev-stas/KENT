@@ -2,7 +2,7 @@
 
 ### KENT (Kubernetes Events Notifier) is a minimalistic Kubernetes events exporter.
 
-At this stage, KENT ships events to [VictoriaLogs](https://docs.victoriametrics.com/victorialogs/), but its architecture allows for adding other log storage systems in the future.
+KENT ships events to [VictoriaLogs](https://docs.victoriametrics.com/victorialogs/) and can also emit them to standard output for local debugging or log collection pipelines.
 
 ### Why KENT?
 
@@ -20,14 +20,18 @@ That’s how KENT was born.
 
 - Collects Kubernetes events (same as kubectl get events) from all or selected namespaces.
 - Exports events to VictoriaLogs via JSONLine API.
+- Can emit the same event payloads to standard output as JSON lines with `recordType: "kubernetes_event"`.
 - Supports multi-tenancy (AccountID, ProjectID).
 - Configurable options:
   * include_namespaces / exclude_namespaces
+  * stdout.enabled
   * stream_fields (define how logs are grouped into streams)
   * extra_fields (attach custom metadata to all events)
 - Health endpoints:
   * /healthz – liveness probe
   * /ready – readiness probe
+
+Exporter service logs are also JSON and include `recordType: "exporter_log"` so they can be distinguished from Kubernetes event records in the same stdout stream.
 
 #### Installation
 
@@ -35,9 +39,21 @@ Clone the repository and install helm chart
 
 ```
 git clone https://github.com/lev-stas/KENT.git
-cd KENT/chart
+cd KENT/deploy/chart
 helm upgrade --install -n monitoring -f values.yaml kent .
 ```
+
+#### Configuration
+
+Enable stdout export when you want Kubernetes events to be emitted directly to the container output:
+
+```yaml
+stdout:
+  enabled: true
+```
+
+When stdout export is enabled, Kubernetes event records include `recordType: "kubernetes_event"`.
+Exporter service logs include `recordType: "exporter_log"`.
 
 
 #### Project Structure
@@ -45,7 +61,7 @@ helm upgrade --install -n monitoring -f values.yaml kent .
 
 `internal/app/` – application orchestration
 
-`internal/adapters/` – adapters for Kubernetes and log storage (currently VictoriaLogs)
+`internal/adapters/` – adapters for Kubernetes and event delivery targets
 
 `internal/usecase/` – business logic (collecting and delivering events)
 

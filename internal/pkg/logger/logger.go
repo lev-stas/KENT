@@ -8,6 +8,7 @@ package logger
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"os"
 	"strings"
@@ -25,6 +26,10 @@ type slogLogger struct {
 }
 
 func New(level string) Logger {
+	return newWithWriter(level, os.Stdout)
+}
+
+func newWithWriter(level string, output io.Writer) Logger {
 	var lvl slog.Level
 
 	switch strings.ToLower(level) {
@@ -38,8 +43,8 @@ func New(level string) Logger {
 		lvl = slog.LevelInfo
 	}
 
-	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: lvl})
-	return &slogLogger{l: slog.New(handler)}
+	handler := slog.NewJSONHandler(output, &slog.HandlerOptions{Level: lvl})
+	return &slogLogger{l: slog.New(handler).With("recordType", "exporter_log")}
 }
 
 func (s *slogLogger) Debug(ctx context.Context, msg string, kv ...any) {

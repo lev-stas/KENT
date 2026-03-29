@@ -11,6 +11,19 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.2.0] – 2026-03-29
+
+### Added
+- Optional `stdout` exporter with `stdout.enabled`, allowing events to be emitted as JSON lines alongside or instead of VictoriaLogs.
+- Explicit `recordType` markers in stdout output:
+  - `kubernetes_event` for exported Kubernetes events
+  - `exporter_log` for service logs produced by KENT itself
+
+### Fixed
+- Documentation now reflects the current Helm chart path and stdout configuration.
+
+---
+
 ## [0.1.1] – 2025-10-06
 
 ### Added

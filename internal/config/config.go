@@ -30,6 +30,9 @@ type Config struct {
 		ProjectID    string            `yaml:"project_id" env:"VL_PROJECT_ID"`
 		StreamFields []string          `yaml:"stream_fields" env:"VL_STREAM_FIELDS" env-separator:","`
 	} `yaml:"victoria_logs"`
+	Stdout struct {
+		Enabled bool `yaml:"enabled" env:"STDOUT_ENABLED"`
+	} `yaml:"stdout"`
 	HealthConfig struct {
 		Port int `yaml:"port" env:"HEALTH_PORT" env-default:"8080"`
 	} `yaml:"health"`
