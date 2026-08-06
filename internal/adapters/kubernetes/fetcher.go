@@ -14,6 +14,8 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -25,7 +27,7 @@ type Logger interface {
 }
 
 type Fetcher struct {
-	client    *kubernetes.Clientset
+	client    kubernetes.Interface
 	logger    Logger
 	includeNS map[string]struct{}
 	excludeNS map[string]struct{}
@@ -36,7 +38,7 @@ func (f *Fetcher) Ready() bool {
 	return f.ready.Load()
 }
 
-func NewFetcher(logger Logger, include []string, exclude []string, client *kubernetes.Clientset) (*Fetcher, error) {
+func NewFetcher(logger Logger, include []string, exclude []string, client kubernetes.Interface) (*Fetcher, error) {
 	return &Fetcher{
 		client:    client,
 		logger:    logger,
@@ -49,77 +51,24 @@ func (f *Fetcher) Stream(ctx context.Context, out chan<- *domain.Event) error {
 	f.ready.Store(true)
 	defer f.ready.Store(false)
 
-	backoff := time.Second
-
-	for {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-
-		watcher, err := f.client.CoreV1().Events("").Watch(ctx, metav1.ListOptions{})
-		if err != nil {
-			f.logger.Error(ctx, "adapters:kubernetes:fetcher: failed to start watch", "error", err)
-			time.Sleep(backoff)
-			if backoff < 30*time.Second {
-				backoff *= 2
-			}
-			continue
-		}
-
-		backoff = time.Second
-
-		for evt := range watcher.ResultChan() {
-			k8sEvent, ok := evt.Object.(*corev1.Event)
+	session := &watchSession{
+		logger: f.logger,
+		scope:  "adapters:kubernetes:fetcher",
+		startWatch: func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
+			return f.client.CoreV1().Events("").Watch(ctx, opts)
+		},
+		mapEvent: func(obj runtime.Object) (*domain.Event, error) {
+			k8sEvent, ok := obj.(*corev1.Event)
 			if !ok {
-				continue
+				return nil, nil
 			}
-
-			domainEvent, err := mapK8sEventToDomain(k8sEvent)
-			if err != nil {
-				f.logger.Warn(ctx, "adapters:kubernetes:fetcher: failed to map event", "error", err)
-				continue
-			}
-
-			f.logger.Debug(ctx, "adapters:kubernetes:fetcher: received event",
-				"namespace", domainEvent.Namespace(),
-				"name", domainEvent.Name(),
-				"reason", domainEvent.Reason(),
-				"type", domainEvent.Type(),
-				"message", domainEvent.Message(),
-			)
-
-			ns := domainEvent.Namespace()
-
-			if len(f.includeNS) > 0 {
-				if _, ok := f.includeNS[ns]; !ok {
-					continue
-				}
-			}
-
-			if _, ok := f.excludeNS[ns]; ok {
-				continue
-			}
-
-			select {
-			case <-ctx.Done():
-				watcher.Stop()
-				return ctx.Err()
-			case out <- domainEvent:
-			}
-		}
-
-		if ctx.Err() != nil {
-			watcher.Stop()
-			return ctx.Err()
-		}
-
-		f.logger.Info(ctx, "adapters:kubernetes:fetcher: watch channel closed, reconnecting...")
-		time.Sleep(backoff)
-
-		if backoff < 30*time.Second {
-			backoff *= 2
-		}
+			return mapK8sEventToDomain(k8sEvent)
+		},
+		includeNS: f.includeNS,
+		excludeNS: f.excludeNS,
 	}
+
+	return session.run(ctx, out)
 }
 
 func mapK8sEventToDomain(e *corev1.Event) (*domain.Event, error) {
@@ -130,8 +79,8 @@ func mapK8sEventToDomain(e *corev1.Event) (*domain.Event, error) {
 		Namespace: e.InvolvedObject.Namespace,
 	}
 
-	eventTime := e.FirstTimestamp.Time
-	lastTime := timePtr(e.LastTimestamp.Time)
+	eventTime := extractCoreEventTime(e)
+	lastTime := extractCoreLastTime(e)
 
 	return domain.NewEvent(
 		string(e.UID),
@@ -144,6 +93,39 @@ func mapK8sEventToDomain(e *corev1.Event) (*domain.Event, error) {
 		e.Source.Component,
 		eventTime,
 		lastTime,
-		e.Count,
+		safeCoreCount(e),
 	)
+}
+
+// Events recorded through events.k8s.io/v1 recorders surface via core/v1 with
+// Count=0 and the real counter in Series; mirror the events/v1 fallbacks so
+// such events keep valid timestamps and dedup-relevant counts.
+func safeCoreCount(e *corev1.Event) int32 {
+	if e.Series != nil {
+		return e.Series.Count
+	}
+	if e.Count > 0 {
+		return e.Count
+	}
+	return 1
+}
+
+func extractCoreEventTime(e *corev1.Event) time.Time {
+	if !e.FirstTimestamp.Time.IsZero() {
+		return e.FirstTimestamp.Time
+	}
+	if !e.EventTime.Time.IsZero() {
+		return e.EventTime.Time
+	}
+	return time.Now().UTC()
+}
+
+func extractCoreLastTime(e *corev1.Event) *time.Time {
+	if !e.LastTimestamp.Time.IsZero() {
+		return timePtr(e.LastTimestamp.Time)
+	}
+	if e.Series != nil && !e.Series.LastObservedTime.Time.IsZero() {
+		return timePtr(e.Series.LastObservedTime.Time)
+	}
+	return nil
 }

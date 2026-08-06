@@ -8,14 +8,28 @@ package usecase
 
 import (
 	"context"
+	"errors"
 	"event_exporter/internal/domain"
-	"fmt"
+	"event_exporter/internal/pkg/metrics"
+	"strconv"
+	"time"
 )
+
+// dedupCacheSize bounds dedup memory to two generations of this many UIDs.
+const dedupCacheSize = 8192
+
+// drainGracePeriod bounds how long writes may continue after shutdown starts,
+// so already-fetched events reach the writers without hanging termination.
+const drainGracePeriod = 5 * time.Second
 
 type EventFetcher interface {
 	Stream(ctx context.Context, out chan<- *domain.Event) error
 }
 
+// LogWriter delivers converted events. Write may block: writers apply
+// backpressure when their internal queue is full (e.g. during a destination
+// outage). That intentionally pauses the whole pipeline — including other
+// writers — instead of dropping events.
 type LogWriter interface {
 	Write(ctx context.Context, logs []*domain.LogEntry) error
 }
@@ -48,44 +62,65 @@ func (c *Collector) Run(ctx context.Context) error {
 	}
 
 	events := make(chan *domain.Event, 100)
+	dedup := newDedupCache(dedupCacheSize)
 
 	go func() {
-		if err := c.fetcher.Stream(ctx, events); err != nil {
+		defer close(events)
+		if err := c.fetcher.Stream(ctx, events); err != nil && !errors.Is(err, context.Canceled) {
 			c.logger.Error(ctx, "usecase:collector: fetcher stream stopped", "error", err)
 		}
 	}()
 
-	for {
+	// writeCtx survives ctx cancellation for drainGracePeriod, so events
+	// already fetched from the watch are handed to the writers on shutdown
+	// instead of being dropped.
+	writeCtx, cancelWrites := context.WithCancel(context.WithoutCancel(ctx))
+	defer cancelWrites()
+	go func() {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
-		case ev, ok := <-events:
-			if !ok {
-				return nil
-			}
+		case <-writeCtx.Done():
+			return
+		}
+		select {
+		case <-time.After(drainGracePeriod):
+			cancelWrites()
+		case <-writeCtx.Done():
+		}
+	}()
 
-			logEntry, err := convertEventToLogEntry(ev)
-			if err != nil {
-				c.logger.Error(ctx, "failed to convert event to log entry", "error", err)
+	entries := make([]*domain.LogEntry, 1)
+
+	for ev := range events {
+		if dedup.isDuplicate(ev.UID(), ev.Count()) {
+			metrics.EventsDeduplicated.Inc()
+			c.logger.Debug(ctx, "usecase:collector: duplicate event skipped",
+				"uid", ev.UID(), "count", ev.Count())
+			continue
+		}
+
+		logEntry, err := convertEventToLogEntry(ev)
+		if err != nil {
+			c.logger.Error(ctx, "failed to convert event to log entry", "error", err)
+			continue
+		}
+
+		if len(c.writers) == 0 {
+			continue
+		}
+
+		entries[0] = logEntry
+		for _, w := range c.writers {
+			if w == nil {
 				continue
 			}
-
-			if len(c.writers) == 0 {
-				continue
+			if err := w.Write(writeCtx, entries); err != nil {
+				c.logger.Error(ctx, "usecase:collector: failed to write log entry", "error", err)
 			}
-
-			entries := []*domain.LogEntry{logEntry}
-			for _, w := range c.writers {
-				if w == nil {
-					continue
-				}
-				if err := w.Write(ctx, entries); err != nil {
-					c.logger.Error(ctx, "usecase:collector: failed to write log entry", "error", err)
-				}
-			}
-
 		}
 	}
+
+	return ctx.Err()
 }
 
 func convertEventToLogEntry(e *domain.Event) (*domain.LogEntry, error) {
@@ -96,14 +131,22 @@ func convertEventToLogEntry(e *domain.Event) (*domain.LogEntry, error) {
 		"event.reason":  e.Reason(),
 		"event.type":    e.Type(),
 		"event.source":  e.Source(),
-		"event.count":   fmt.Sprintf("%d", e.Count()),
+		"event.count":   strconv.FormatInt(int64(e.Count()), 10),
 	}
 
 	level := mapEventTypeToLevel(e.Type())
 	logType := "event" //Hardcoded type. In future may be several types.
 
+	// For recurring events each count increment is a fresh occurrence: stamp
+	// it with the last-observed time, not the first one — otherwise records
+	// of a long-lived event all land at its first occurrence in the past.
+	ts := e.EventTime()
+	if lt := e.LastTimestamp(); lt != nil && lt.After(ts) {
+		ts = *lt
+	}
+
 	return domain.NewLogEntry(
-		e.EventTime(),
+		ts,
 		level,
 		logType,
 		e.Message(),

@@ -8,6 +8,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	k8sfetcher "event_exporter/internal/adapters/kubernetes"
 	stdoutwriter "event_exporter/internal/adapters/stdout"
 	"event_exporter/internal/adapters/victorialogs"
@@ -64,8 +65,10 @@ func Run(ctx context.Context, cfg config.Config) error {
 		}
 	}()
 
+	collectorDone := make(chan struct{})
 	go func() {
-		if err := collector.Run(ctx); err != nil && err != context.Canceled {
+		defer close(collectorDone)
+		if err := collector.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			log.Error(ctx, "app: collector stopped", "error", err)
 		}
 	}()
@@ -77,6 +80,14 @@ func Run(ctx context.Context, cfg config.Config) error {
 
 	if err := healthSvs.Stop(shutdownCtx); err != nil {
 		log.Error(context.Background(), "app: failed to stop health server", "error", err)
+	}
+
+	// Let the collector drain already-fetched events into the writers before
+	// stopping them; bounded so a stuck writer cannot hang shutdown forever.
+	select {
+	case <-collectorDone:
+	case <-time.After(10 * time.Second):
+		log.Warn(context.Background(), "app: collector did not finish draining in time")
 	}
 
 	stopWriters()
@@ -115,6 +126,20 @@ func buildWriters(cfg config.Config, log logger.Logger) ([]usecase.LogWriter, fu
 		ExtraFields:  cfg.VictoriaLogs.ExtraFields,
 		Timeout:      cfg.VictoriaLogs.Timeout,
 		StreamFields: cfg.VictoriaLogs.StreamFields,
+		QueueSize:    cfg.VictoriaLogs.QueueSize,
+		Headers:      cfg.VictoriaLogs.Headers,
+		Auth: victorialogs.AuthConfig{
+			BasicUsername: cfg.VictoriaLogs.Auth.BasicUsername,
+			BasicPassword: cfg.VictoriaLogs.Auth.BasicPassword,
+			BearerToken:   cfg.VictoriaLogs.Auth.BearerToken,
+		},
+		TLS: victorialogs.TLSConfig{
+			InsecureSkipVerify: cfg.VictoriaLogs.TLS.InsecureSkipVerify,
+			CAFile:             cfg.VictoriaLogs.TLS.CAFile,
+			CertFile:           cfg.VictoriaLogs.TLS.CertFile,
+			KeyFile:            cfg.VictoriaLogs.TLS.KeyFile,
+			ServerName:         cfg.VictoriaLogs.TLS.ServerName,
+		},
 	}, log)
 	if err != nil {
 		return nil, nil, fmt.Errorf("app: failed to init victorialogs writer: %w", err)

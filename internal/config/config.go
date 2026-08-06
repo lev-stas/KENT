@@ -29,6 +29,20 @@ type Config struct {
 		AccountID    string            `yaml:"account_id" env:"VL_ACCOUNT_ID"`
 		ProjectID    string            `yaml:"project_id" env:"VL_PROJECT_ID"`
 		StreamFields []string          `yaml:"stream_fields" env:"VL_STREAM_FIELDS" env-separator:","`
+		QueueSize    int               `yaml:"queue_size" env:"VL_QUEUE_SIZE"`
+		Headers      map[string]string `yaml:"headers"`
+		Auth         struct {
+			BasicUsername string `yaml:"basic_username" env:"VL_AUTH_BASIC_USERNAME"`
+			BasicPassword string `yaml:"basic_password" env:"VL_AUTH_BASIC_PASSWORD"`
+			BearerToken   string `yaml:"bearer_token" env:"VL_AUTH_BEARER_TOKEN"`
+		} `yaml:"auth"`
+		TLS struct {
+			InsecureSkipVerify bool   `yaml:"insecure_skip_verify" env:"VL_TLS_INSECURE_SKIP_VERIFY"`
+			CAFile             string `yaml:"ca_file" env:"VL_TLS_CA_FILE"`
+			CertFile           string `yaml:"cert_file" env:"VL_TLS_CERT_FILE"`
+			KeyFile            string `yaml:"key_file" env:"VL_TLS_KEY_FILE"`
+			ServerName         string `yaml:"server_name" env:"VL_TLS_SERVER_NAME"`
+		} `yaml:"tls"`
 	} `yaml:"victoria_logs"`
 	Stdout struct {
 		Enabled bool `yaml:"enabled" env:"STDOUT_ENABLED"`

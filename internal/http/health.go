@@ -8,6 +8,7 @@ package httpserver
 
 import (
 	"context"
+	"event_exporter/internal/pkg/metrics"
 	"fmt"
 	"net/http"
 )
@@ -28,6 +29,8 @@ func NewHealthServer(port int, fetcher ReadyChecker) *Server {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "ok")
 	})
+
+	mux.Handle("/metrics", metrics.Handler())
 
 	mux.HandleFunc("/ready", func(w http.ResponseWriter, r *http.Request) {
 		if s.fetcher != nil && s.fetcher.Ready() {

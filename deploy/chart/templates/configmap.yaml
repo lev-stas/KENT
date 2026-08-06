@@ -24,8 +24,30 @@ data:
       batch_size: {{ .Values.config.victorialogs.batchSize }}
       flush_time: {{ .Values.config.victorialogs.flushTime | quote }}
       timeout: {{ .Values.config.victorialogs.timeout | quote }}
+      queue_size: {{ .Values.config.victorialogs.queueSize }}
       extra_fields: {{ .Values.config.victorialogs.extraFields | toJson }}
       stream_fields: {{ .Values.config.victorialogs.streamFields | toJson }}
+      headers: {{ .Values.config.victorialogs.headers | toJson }}
+      {{- with .Values.config.victorialogs.auth }}
+      {{- if or .basicUsername .basicPassword .bearerToken }}
+      auth:
+        {{- with .basicUsername }}
+        basic_username: {{ . | quote }}
+        {{- end }}
+        {{- with .basicPassword }}
+        basic_password: {{ . | quote }}
+        {{- end }}
+        {{- with .bearerToken }}
+        bearer_token: {{ . | quote }}
+        {{- end }}
+      {{- end }}
+      {{- end }}
+      tls:
+        insecure_skip_verify: {{ .Values.config.victorialogs.tls.insecureSkipVerify }}
+        ca_file: {{ .Values.config.victorialogs.tls.caFile | quote }}
+        cert_file: {{ .Values.config.victorialogs.tls.certFile | quote }}
+        key_file: {{ .Values.config.victorialogs.tls.keyFile | quote }}
+        server_name: {{ .Values.config.victorialogs.tls.serverName | quote }}
     stdout:
       enabled: {{ .Values.config.stdout.enabled }}
     health:
