@@ -1,0 +1,27 @@
+apiVersion: v1
+entries:
+  kent-exporter:
+  - apiVersion: v2
+    appVersion: 0.3.0
+    created: "2026-08-07T13:19:27.804675893Z"
+    description: KENT (Kubernetes Events Notifier) — exports Kubernetes events to
+      VictoriaLogs
+    digest: 170557d465dc6d51747cfe48719949ea721b1d8f7eabfa73e1177580d03c6559
+    home: https://github.com/lev-stas/KENT
+    keywords:
+    - kubernetes
+    - kubernetes-events
+    - victorialogs
+    - logging
+    - exporter
+    maintainers:
+    - name: Stanislav Levchenko
+      url: https://github.com/lev-stas
+    name: kent-exporter
+    sources:
+    - https://github.com/lev-stas/KENT
+    type: application
+    urls:
+    - https://github.com/lev-stas/KENT/releases/download/kent-exporter-0.3.0/kent-exporter-0.3.0.tgz
+    version: 0.3.0
+generated: "2026-08-07T13:19:27.804687696Z"
