@@ -19,6 +19,12 @@ spec:
     metadata:
       labels:
         app: {{ .Chart.Name }}
+      annotations:
+        # Roll the pod when the rendered config changes.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
       serviceAccountName: {{ .Values.serviceAccount.name }}
       securityContext:
@@ -38,10 +44,17 @@ spec:
             {{- if .Values.extraEnv }}
             {{- toYaml .Values.extraEnv | nindent 12 }}
             {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.config.health.port }}
+              protocol: TCP
           volumeMounts:
             - name: config
               mountPath: /etc/event-exporter
               readOnly: true
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /healthz
@@ -65,3 +78,6 @@ spec:
         - name: config
           configMap:
             name: {{ .Chart.Name }}-config
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}

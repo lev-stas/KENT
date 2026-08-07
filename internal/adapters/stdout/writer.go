@@ -10,12 +10,15 @@ import (
 	"context"
 	"encoding/json"
 	"event_exporter/internal/domain"
+	"event_exporter/internal/pkg/metrics"
 	"fmt"
 	"io"
 	"os"
 	"sync"
 	"time"
 )
+
+const writerName = "stdout"
 
 type Config struct {
 	Enabled bool
@@ -54,15 +57,20 @@ func (w *Writer) Write(ctx context.Context, logs []*domain.LogEntry) error {
 
 		line, err := json.Marshal(toDocument(entry))
 		if err != nil {
+			metrics.SendErrors.WithLabelValues(writerName).Inc()
 			return fmt.Errorf("adapters:stdout:writer: marshal log entry: %w", err)
 		}
 		if _, err := w.output.Write(append(line, '\n')); err != nil {
+			metrics.SendErrors.WithLabelValues(writerName).Inc()
 			return fmt.Errorf("adapters:stdout:writer: write log entry: %w", err)
 		}
+		sentCounter.Inc()
 	}
 
 	return nil
 }
+
+var sentCounter = metrics.EventsSent.WithLabelValues(writerName)
 
 func toDocument(entry *domain.LogEntry) map[string]any {
 	doc := map[string]any{

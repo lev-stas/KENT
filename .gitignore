@@ -13,3 +13,7 @@
 
 # Helm / Kubernetes
 *.tgz
+
+# Local-only files
+*.local
+deploy/local/

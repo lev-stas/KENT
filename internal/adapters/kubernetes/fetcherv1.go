@@ -15,19 +15,14 @@ import (
 
 	eventv1 "k8s.io/api/events/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 )
 
-type LoggerV1 interface {
-	Debug(ctx context.Context, msg string, kv ...any)
-	Info(ctx context.Context, msg string, kv ...any)
-	Warn(ctx context.Context, msg string, kv ...any)
-	Error(ctx context.Context, msg string, kv ...any)
-}
-
 type FetcherV1 struct {
-	client    *kubernetes.Clientset
-	logger    LoggerV1
+	client    kubernetes.Interface
+	logger    Logger
 	includeNS map[string]struct{}
 	excludeNS map[string]struct{}
 	ready     atomic.Bool
@@ -37,7 +32,7 @@ func (f *FetcherV1) Ready() bool {
 	return f.ready.Load()
 }
 
-func NewFetcherV1(logger LoggerV1, include []string, exclude []string, client *kubernetes.Clientset) (*FetcherV1, error) {
+func NewFetcherV1(logger Logger, include []string, exclude []string, client kubernetes.Interface) (*FetcherV1, error) {
 	return &FetcherV1{
 		client:    client,
 		logger:    logger,
@@ -51,77 +46,24 @@ func (f *FetcherV1) Stream(ctx context.Context, out chan<- *domain.Event) error 
 	f.ready.Store(true)
 	defer f.ready.Store(false)
 
-	backoff := time.Second
-
-	for {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-
-		watcher, err := f.client.EventsV1().Events("").Watch(ctx, metav1.ListOptions{})
-		if err != nil {
-			f.logger.Error(ctx, "adapters:kubernetes:fetcherv1: failed to start watch", "error", err)
-			time.Sleep(backoff)
-			if backoff < 30*time.Second {
-				backoff *= 2
-			}
-			continue
-		}
-
-		backoff = time.Second
-
-		for evt := range watcher.ResultChan() {
-			k8sEvent, ok := evt.Object.(*eventv1.Event)
+	session := &watchSession{
+		logger: f.logger,
+		scope:  "adapters:kubernetes:fetcherv1",
+		startWatch: func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
+			return f.client.EventsV1().Events("").Watch(ctx, opts)
+		},
+		mapEvent: func(obj runtime.Object) (*domain.Event, error) {
+			k8sEvent, ok := obj.(*eventv1.Event)
 			if !ok {
-				continue
+				return nil, nil
 			}
-
-			domainEvent, err := mapK8sEventV1ToDomain(k8sEvent)
-			if err != nil {
-				f.logger.Warn(ctx, "adapters:kubernetes:fetcherv1: failed to map event", "error", err)
-				continue
-			}
-
-			f.logger.Debug(
-				ctx, "adapters:kubernetes:fetcherv1: received event",
-				"namespace", domainEvent.Namespace(),
-				"name", domainEvent.Name(),
-				"reason", domainEvent.Reason(),
-				"type", domainEvent.Type(),
-				"message", domainEvent.Message(),
-			)
-
-			ns := domainEvent.Namespace()
-
-			if len(f.includeNS) > 0 {
-				if _, ok := f.includeNS[ns]; !ok {
-					continue
-				}
-			}
-
-			if _, ok := f.excludeNS[ns]; ok {
-				continue
-			}
-
-			select {
-			case <-ctx.Done():
-				watcher.Stop()
-				return ctx.Err()
-			case out <- domainEvent:
-			}
-		}
-		if ctx.Err() != nil {
-			watcher.Stop()
-			return ctx.Err()
-		}
-
-		f.logger.Info(ctx, "adapters:kubernetes:fetcherv1: watch channel closed, reconnecting...")
-		time.Sleep(backoff)
-
-		if backoff < 30*time.Second {
-			backoff *= 2
-		}
+			return mapK8sEventV1ToDomain(k8sEvent)
+		},
+		includeNS: f.includeNS,
+		excludeNS: f.excludeNS,
 	}
+
+	return session.run(ctx, out)
 }
 
 func mapK8sEventV1ToDomain(e *eventv1.Event) (*domain.Event, error) {
@@ -132,7 +74,7 @@ func mapK8sEventV1ToDomain(e *eventv1.Event) (*domain.Event, error) {
 	}
 
 	eventTime := extractEventTime(e)
-	lastTime := timePtr(e.DeprecatedLastTimestamp.Time)
+	lastTime := extractLastTime(e)
 
 	return domain.NewEvent(
 		string(e.UID),
@@ -168,4 +110,14 @@ func extractEventTime(e *eventv1.Event) time.Time {
 	}
 
 	return time.Now().UTC()
+}
+
+// extractLastTime prefers the series' last-observed time: for recurring
+// events it tracks the latest occurrence, which DeprecatedLastTimestamp
+// may miss for series-style recorders.
+func extractLastTime(e *eventv1.Event) *time.Time {
+	if e.Series != nil && !e.Series.LastObservedTime.Time.IsZero() {
+		return timePtr(e.Series.LastObservedTime.Time)
+	}
+	return timePtr(e.DeprecatedLastTimestamp.Time)
 }

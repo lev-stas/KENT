@@ -5,9 +5,48 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+---
+
+## [0.3.0] – 2026-08-07
+
+Validated with an e2e suite on kind (VictoriaLogs outage, poison batches, graceful
+shutdown, auth/TLS) and a 12-hour side-by-side run against v0.1.1 in a live cluster:
+full event coverage, zero duplicates, zero losses.
+
 ### Added
+- **Delivery reliability**:
+  - Failed batches are retried with exponential backoff (1s → 30s) on transient errors
+    (network failures, HTTP 429/5xx); permanently rejected batches (other 4xx) are dropped
+    with an error log and a metric instead of blocking the pipeline.
+  - The Kubernetes watch resumes from the last seen `resourceVersion` after reconnects
+    (with `AllowWatchBookmarks`), so events emitted while disconnected are recovered as
+    long as the version is still within the API server's retention window. Expired
+    versions (HTTP 410 Gone) fall back to a fresh watch. The checkpoint is in-memory:
+    a pod restart starts fresh and re-exports the currently stored events.
+  - Events re-delivered by the watch (reconnects, TTL deletions) are deduplicated by
+    UID + count with a bounded two-generation cache (2×8192 UIDs).
+  - Graceful shutdown now drains the whole pipeline: the collector hands already-fetched
+    events to the writers (bounded grace period), then the writer flushes its queue and
+    buffer chunk-by-chunk with fresh bounded contexts; `Stop()` blocks until done.
+  - `queue_size` config option (`VL_QUEUE_SIZE`, default 5000) for the in-memory send queue.
+- **Prometheus metrics** on the health port (`/metrics`): events received/filtered/
+  deduplicated/sent/dropped, send errors, queue length, batch size histogram, watch reconnects.
+- **Authentication and TLS** for the VictoriaLogs endpoint: basic auth, bearer token,
+  custom HTTP headers, custom CA, client certificates, `insecure_skip_verify`, `server_name`.
+- Helm chart: `podAnnotations`, `extraVolumes`/`extraVolumeMounts` (for TLS files), container
+  `ports` declaration for metrics scraping; new `queueSize`, `headers`, `auth.*`, `tls.*` values.
 
 ### Fixed
+- Recurring events are now stamped with their last-observed time instead of the first
+  occurrence, so count increments of a long-lived event no longer land days in the past
+  (events/v1 additionally falls back to `series.lastObservedTime`).
+- Helm: the deployment now carries a `checksum/config` annotation, so `helm upgrade`
+  with changed config restarts the pod instead of leaving it on the old configuration.
+- A batch that failed to send to VictoriaLogs was silently dropped; it is now retried.
+- Reconnecting to the watch could silently lose events emitted during the disconnect window.
+- Shutdown discarded buffered events because the final flush ran with an already-cancelled
+  context; deletions of expired Event objects were re-exported as fresh events.
+- Debug logging no longer prints request headers and payloads (they may contain credentials).
 
 ---
 

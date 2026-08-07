@@ -2,7 +2,7 @@ replicaCount: 1
 
 image:
   repository: staslevchenko/kent
-  tag: "0.2.0"
+  tag: "0.3.0"
   pullPolicy: IfNotPresent
 
 resources:
@@ -29,15 +29,31 @@ config:
 
   victorialogs:
     enabled: true
-    endpoint: "http://vlogs.domain.com:9429"
+    endpoint: "http://vlogs.domain.com:9428"
     clusterID: "k8s-prod"
     accountID: "10"
     projectID: "10"
     batchSize: 500
     flushTime: "30s"
     timeout: "10s"
+    queueSize: 5000
     extraFields: {}
     streamFields: ["k8s.namespace"]
+    # Extra HTTP headers added to every insert request.
+    headers: {}
+    auth:
+      basicUsername: ""
+      # Prefer passing the password via a Secret and extraEnv (VL_AUTH_BASIC_PASSWORD)
+      # instead of keeping it in values: values land in a ConfigMap.
+      basicPassword: ""
+      bearerToken: ""
+    tls:
+      insecureSkipVerify: false
+      # Files must be mounted into the pod, see extraVolumes/extraVolumeMounts.
+      caFile: ""
+      certFile: ""
+      keyFile: ""
+      serverName: ""
 
   stdout:
     enabled: false
@@ -46,3 +62,10 @@ config:
     port: 8080
 
 extraEnv: []
+
+# Annotations for the exporter pod, e.g. prometheus.io/scrape for /metrics.
+podAnnotations: {}
+
+# Extra volumes/mounts, e.g. for TLS certificates referenced in config.
+extraVolumes: []
+extraVolumeMounts: []
