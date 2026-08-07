@@ -39,15 +39,16 @@ Most Kubernetes event exporters (such as `kubernetes-event-exporter`) aim to be 
 
 ## Quick start
 
-Clone the repository and install the Helm chart:
+Install the Helm chart from the KENT repository:
 
 ```bash
-git clone https://github.com/lev-stas/KENT.git
-cd KENT/deploy/chart
-helm upgrade --install -n monitoring -f values.yaml kent .
+helm repo add kent https://lev-stas.github.io/KENT
+helm upgrade --install -n monitoring --create-namespace kent kent/kent-exporter \
+  --set config.victorialogs.endpoint=http://vlogs.example.com:9428 \
+  --set config.victorialogs.clusterID=k8s-prod
 ```
 
-Point the exporter at your VictoriaLogs instance in `values.yaml`:
+Or point the exporter at your VictoriaLogs instance in a values file:
 
 ```yaml
 config:
