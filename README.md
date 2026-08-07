@@ -1,5 +1,6 @@
 # KENT — Kubernetes Event Exporter for VictoriaLogs
 
+[![Release](https://img.shields.io/github/v/release/lev-stas/KENT)](https://github.com/lev-stas/KENT/releases)
 [![License](https://img.shields.io/github/license/lev-stas/KENT)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/lev-stas/KENT)](https://goreportcard.com/report/github.com/lev-stas/KENT)
 [![Docker Pulls](https://img.shields.io/docker/pulls/staslevchenko/kent)](https://hub.docker.com/r/staslevchenko/kent)

@@ -5,6 +5,14 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+---
+
+## [0.3.0] – 2026-08-07
+
+Validated with an e2e suite on kind (VictoriaLogs outage, poison batches, graceful
+shutdown, auth/TLS) and a 12-hour side-by-side run against v0.1.1 in a live cluster:
+full event coverage, zero duplicates, zero losses.
+
 ### Added
 - **Delivery reliability**:
   - Failed batches are retried with exponential backoff (1s → 30s) on transient errors
