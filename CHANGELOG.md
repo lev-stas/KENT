@@ -5,6 +5,12 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Helm chart 0.3.1: a ClusterIP Service in front of the metrics port, and an optional
+  `ServiceMonitor` (`serviceMonitor.enabled`, off by default since the Prometheus Operator
+  CRD is not present in every cluster) with `interval`, `scrapeTimeout` and
+  `additionalLabels` options. Chart-only change — the exporter itself is unchanged.
+
 ---
 
 ## [0.3.0] – 2026-08-07

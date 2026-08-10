@@ -80,6 +80,9 @@ All options live in the Helm chart's `values.yaml`:
 | `config.victorialogs.auth.bearerToken` | — | Bearer token (mutually exclusive with basic auth) |
 | `config.victorialogs.tls.*` | — | `caFile`, `certFile`, `keyFile`, `serverName`, `insecureSkipVerify`; mount files via `extraVolumes` / `extraVolumeMounts` |
 | `config.stdout.enabled` | `false` | Also emit events to stdout as JSON lines |
+| `serviceMonitor.enabled` | `false` | Create a `ServiceMonitor` for the `/metrics` endpoint (needs the Prometheus Operator CRD) |
+| `serviceMonitor.interval` / `scrapeTimeout` | `60s` / `58s` | Scrape timing |
+| `serviceMonitor.additionalLabels` | `{}` | Extra labels on the `ServiceMonitor`, e.g. `release: kube-prometheus-stack` |
 
 ## Observability
 
@@ -88,6 +91,16 @@ KENT exposes Prometheus metrics on the health port (`:8080/metrics`), ready to b
 - `kent_events_received_total`, `kent_events_filtered_total`, `kent_events_deduplicated_total`
 - `kent_events_sent_total{writer}`, `kent_events_dropped_total{writer,reason}`, `kent_send_errors_total{writer}`
 - `kent_send_queue_length{writer}`, `kent_batch_size` (histogram), `kent_watch_reconnects_total`
+
+The chart always creates a ClusterIP Service in front of that port, and can also create a `ServiceMonitor` for the Prometheus Operator (the VictoriaMetrics operator converts these objects too). It is disabled by default, because the CRD is not present in every cluster:
+
+```yaml
+serviceMonitor:
+  enabled: true
+  # kube-prometheus-stack and similar setups select ServiceMonitors by label
+  additionalLabels:
+    release: kube-prometheus-stack
+```
 
 ## Exported fields and LogsQL examples
 

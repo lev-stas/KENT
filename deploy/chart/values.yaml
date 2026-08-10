@@ -61,9 +61,21 @@ config:
   health:
     port: 8080
 
+# Scraping of the /metrics endpoint. The chart always creates a ClusterIP Service;
+# the ServiceMonitor is optional, since its CRD is not present in every cluster.
+serviceMonitor:
+  # Requires the Prometheus Operator CRD (monitoring.coreos.com/v1). The
+  # VictoriaMetrics operator converts these objects as well.
+  enabled: false
+  interval: 60s
+  scrapeTimeout: 58s
+  # Some setups select ServiceMonitors by label — kube-prometheus-stack, for
+  # example, matches its own release: {release: kube-prometheus-stack}.
+  additionalLabels: {}
+
 extraEnv: []
 
-# Annotations for the exporter pod, e.g. prometheus.io/scrape for /metrics.
+# Annotations for the exporter pod.
 podAnnotations: {}
 
 # Extra volumes/mounts, e.g. for TLS certificates referenced in config.
