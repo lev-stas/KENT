@@ -13,6 +13,7 @@ import (
 	stdoutwriter "event_exporter/internal/adapters/stdout"
 	"event_exporter/internal/adapters/victorialogs"
 	"event_exporter/internal/config"
+	"event_exporter/internal/domain"
 	httpserver "event_exporter/internal/http"
 	"event_exporter/internal/pkg/logger"
 	"event_exporter/internal/usecase"
@@ -38,7 +39,17 @@ func Run(ctx context.Context, cfg config.Config) error {
 		return fmt.Errorf("app: cannot create kube client; fallback to core/v1: %w", err)
 	}
 
-	fetcher, err := chooseFetcher(ctx, log, cfg.Kubernetes.IncludeNamespaces, cfg.Kubernetes.ExcludeNamespaces, cs)
+	filter, err := buildEventFilter(cfg)
+	if err != nil {
+		return err
+	}
+
+	// The effective filter is the first thing to check when events stop
+	// arriving, and a config typo is invisible otherwise. It is reported by
+	// the filter itself, so what is logged is what is enforced.
+	log.Info(ctx, "app: event filter configured", filter.LogFields()...)
+
+	fetcher, err := chooseFetcher(ctx, log, filter, cs)
 
 	if err != nil {
 		return fmt.Errorf("app: failed to init fetcher: %w", err)
@@ -165,27 +176,42 @@ func buildWriters(cfg config.Config, log logger.Logger) ([]usecase.LogWriter, fu
 	}, nil
 }
 
+func buildEventFilter(cfg config.Config) (domain.EventFilter, error) {
+	filter, err := domain.NewEventFilter(domain.FilterSpec{
+		IncludeNamespaces: cfg.Kubernetes.IncludeNamespaces,
+		ExcludeNamespaces: cfg.Kubernetes.ExcludeNamespaces,
+		IncludeEventTypes: cfg.Kubernetes.IncludeEventTypes,
+		IncludeKinds:      cfg.Kubernetes.IncludeKinds,
+		IncludeReasons:    cfg.Kubernetes.IncludeReasons,
+		ExcludeReasons:    cfg.Kubernetes.ExcludeReasons,
+	})
+	if err != nil {
+		return domain.EventFilter{}, fmt.Errorf("app: invalid event filter: %w", err)
+	}
+
+	return filter, nil
+}
+
 func chooseFetcher(
 	ctx context.Context,
 	log logger.Logger,
-	include []string,
-	exclude []string,
+	filter domain.EventFilter,
 	client *kubernetes.Clientset,
 ) (usecase.EventFetcher, error) {
 
 	ok, err := supportsEventsV1(client)
 	if err != nil {
 		log.Warn(ctx, "app: events API detection failed; fallback to core/v1", "error", err)
-		return k8sfetcher.NewFetcher(log, include, exclude, client)
+		return k8sfetcher.NewFetcher(log, filter, client)
 	}
 
 	if !ok {
 		log.Info(ctx, "app: events.k8s.io/v1 not available; using core/v1/events")
-		return k8sfetcher.NewFetcher(log, include, exclude, client)
+		return k8sfetcher.NewFetcher(log, filter, client)
 	}
 
 	log.Info(ctx, "app: using events.k8s.io/v1 API for event collection")
-	return k8sfetcher.NewFetcherV1(log, include, exclude, client)
+	return k8sfetcher.NewFetcherV1(log, filter, client)
 }
 
 func supportsEventsV1(dc discovery.DiscoveryInterface) (bool, error) {

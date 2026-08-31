@@ -26,57 +26,68 @@ type ObjectRef struct {
 }
 
 type Event struct {
-	uid            string
-	name           string
-	namespace      string
-	reason         string
-	message        string
-	eventType      string
-	involvedObject ObjectRef
-	source         string
-	eventTime      time.Time
-	lastTimestamp  *time.Time
-	count          int32
+	uid               string
+	name              string
+	namespace         string
+	reason            string
+	message           string
+	eventType         string
+	involvedObject    ObjectRef
+	source            string
+	action            string
+	reportingInstance string
+	eventTime         time.Time
+	lastTimestamp     *time.Time
+	count             int32
 }
 
-func NewEvent(
-	id string,
-	name string,
-	ns string,
-	reason string,
-	msg string,
-	t string,
-	object ObjectRef,
-	source string,
-	eventTime time.Time,
-	last *time.Time,
-	count int32,
-) (*Event, error) {
-	if id == "" {
+// EventInput carries the fields of an event to NewEvent. Named fields keep
+// the many same-typed values from silently swapping places at the call site.
+// Action and ReportingInstance are optional: legacy recorders leave them empty.
+type EventInput struct {
+	UID               string
+	Name              string
+	Namespace         string
+	Reason            string
+	Message           string
+	Type              string
+	Object            ObjectRef
+	Source            string
+	Action            string
+	ReportingInstance string
+	EventTime         time.Time
+	LastTimestamp     *time.Time
+	Count             int32
+}
+
+func NewEvent(in EventInput) (*Event, error) {
+	if in.UID == "" {
 		return nil, ErrInvalidEventUID
 	}
-	if msg == "" {
+	if in.Message == "" {
 		return nil, ErrInvalidEventMessage
 	}
-	if eventTime.IsZero() {
+	if in.EventTime.IsZero() {
 		return nil, ErrInvalidEventFirstTimestamp
 	}
-	if count < 0 {
+	if in.Count < 0 {
 		return nil, ErrInvalidEventCount
 	}
 
 	return &Event{
-		uid:            id,
-		name:           name,
-		namespace:      ns,
-		reason:         reason,
-		message:        msg,
-		eventType:      t,
-		involvedObject: object,
-		source:         source,
-		eventTime:      eventTime,
-		lastTimestamp:  last,
-		count:          count,
+		uid:               in.UID,
+		name:              in.Name,
+		namespace:         in.Namespace,
+		reason:            in.Reason,
+		message:           in.Message,
+		eventType:         in.Type,
+		involvedObject:    in.Object,
+		source:            in.Source,
+		action:            in.Action,
+		reportingInstance: in.ReportingInstance,
+		eventTime:         in.EventTime,
+		lastTimestamp:     in.LastTimestamp,
+		count:             in.Count,
 	}, nil
 }
 
@@ -88,6 +99,8 @@ func (e *Event) Message() string           { return e.message }
 func (e *Event) Type() string              { return e.eventType }
 func (e *Event) Object() ObjectRef         { return e.involvedObject }
 func (e *Event) Source() string            { return e.source }
+func (e *Event) Action() string            { return e.action }
+func (e *Event) ReportingInstance() string { return e.reportingInstance }
 func (e *Event) FirstTimestamp() time.Time { return e.eventTime }
 func (e *Event) EventTime() time.Time      { return e.eventTime }
 func (e *Event) LastTimestamp() *time.Time { return e.lastTimestamp }

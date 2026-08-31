@@ -15,6 +15,10 @@ data:
     kubernetes:
       include_namespaces: {{ .Values.config.kubernetes.include_namespaces | toJson }}
       exclude_namespaces: {{ .Values.config.kubernetes.exclude_namespaces | toJson }}
+      include_event_types: {{ .Values.config.kubernetes.include_event_types | default list | toJson }}
+      include_kinds: {{ .Values.config.kubernetes.include_kinds | default list | toJson }}
+      include_reasons: {{ .Values.config.kubernetes.include_reasons | default "" | quote }}
+      exclude_reasons: {{ .Values.config.kubernetes.exclude_reasons | default "" | quote }}
     victoria_logs:
       enabled: {{ .Values.config.victorialogs.enabled }}
       endpoint: {{ .Values.config.victorialogs.endpoint | quote }}

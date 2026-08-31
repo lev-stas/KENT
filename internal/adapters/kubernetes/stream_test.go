@@ -210,12 +210,17 @@ func TestWatchSessionResetsResourceVersionOnExpired(t *testing.T) {
 	<-done
 }
 
-func TestWatchSessionFiltersNamespaces(t *testing.T) {
+func TestWatchSessionAppliesFilter(t *testing.T) {
 	t.Parallel()
 
 	p := newFakeWatchProvider(1)
 	session := newTestSession(p)
-	session.excludeNS = toSet([]string{"kube-system"})
+
+	filter, err := domain.NewEventFilter(domain.FilterSpec{ExcludeNamespaces: []string{"kube-system"}})
+	if err != nil {
+		t.Fatalf("NewEventFilter returned error: %v", err)
+	}
+	session.filter = filter
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -233,6 +238,51 @@ func TestWatchSessionFiltersNamespaces(t *testing.T) {
 
 	if ev := receiveEvent(t, out); ev.UID() != "uid-app" {
 		t.Fatalf("expected kube-system event to be filtered, got uid %s", ev.UID())
+	}
+
+	cancel()
+	<-done
+}
+
+// Filtered events must still advance the resume point: otherwise a watch
+// window in which everything was filtered resumes from a stale
+// resourceVersion, which ages out into a 410 and loses the window.
+func TestWatchSessionCheckpointsFilteredEvents(t *testing.T) {
+	t.Parallel()
+
+	p := newFakeWatchProvider(2)
+	session := newTestSession(p)
+
+	filter, err := domain.NewEventFilter(domain.FilterSpec{IncludeNamespaces: []string{"nothing-matches-this"}})
+	if err != nil {
+		t.Fatalf("NewEventFilter returned error: %v", err)
+	}
+	session.filter = filter
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	out := make(chan *domain.Event, 10)
+	done := make(chan struct{})
+	go func() {
+		_ = session.run(ctx, out)
+		close(done)
+	}()
+
+	waitStart(t, p, 0)
+	p.watchers[0].Add(testK8sEvent("uid-1", "default", "100"))
+	p.watchers[0].Add(testK8sEvent("uid-2", "default", "101"))
+	p.watchers[0].Stop()
+
+	waitStart(t, p, 1)
+	if got := p.call(1).ResourceVersion; got != "101" {
+		t.Fatalf("filtered events must still checkpoint the resourceVersion, resumed from %q", got)
+	}
+
+	select {
+	case ev := <-out:
+		t.Fatalf("filtered event must not be exported, got uid %s", ev.UID())
+	default:
 	}
 
 	cancel()

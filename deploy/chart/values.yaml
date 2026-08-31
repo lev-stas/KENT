@@ -2,7 +2,7 @@ replicaCount: 1
 
 image:
   repository: staslevchenko/kent
-  tag: "0.3.0"
+  tag: "0.4.0"
   pullPolicy: IfNotPresent
 
 resources:
@@ -26,6 +26,20 @@ config:
   kubernetes:
     include_namespaces: []
     exclude_namespaces: []
+    # Every filter below is optional; an empty one imposes no restriction.
+    # Export only these event types (Normal, Warning); case-insensitive.
+    include_event_types: []
+    # Export only events about these involved-object kinds (Pod, Node, ...);
+    # case-insensitive.
+    include_kinds: []
+    # RE2 patterns matched against event.reason. They are unanchored, so
+    # "^(Failed|BackOff)" also keeps FailedMount and BackOffPullImage — anchor
+    # both ends with ^...$ when you mean an exact set. Go's regexp has no
+    # negative lookahead, hence both keys: include_reasons keeps only what it
+    # matches, exclude_reasons: "^(Pulled|Created|Started)$" drops routine
+    # noise. An event must pass include and must not match exclude.
+    include_reasons: ""
+    exclude_reasons: ""
 
   victorialogs:
     enabled: true

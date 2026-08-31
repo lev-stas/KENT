@@ -5,6 +5,45 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+---
+
+## [0.4.0] – 2026-08-31
+
+### Added
+- **Event filters** beside the existing namespace ones, all optional and all off by default
+  (an upgrade without a values change exports exactly what it exported before):
+  - `include_event_types` — keep only `Normal` or `Warning` events (matched case-insensitively).
+  - `include_kinds` — keep only events about the given object kinds (`Pod`, `Node`, …).
+  - `include_reasons` / `exclude_reasons` — RE2 patterns over the event reason. Two keys
+    rather than one because Go's regexp has no negative lookahead, so a single pattern
+    cannot express both "only these reasons" and "everything but these".
+
+  An event is exported when it passes every configured rule; `exclude_*` wins over
+  `include_*`. An invalid pattern fails at startup instead of silently dropping events,
+  and the effective filter is logged when the exporter starts.
+- **`k8s.object.name`** — the name of the object an event is about. `k8s.name` holds the
+  name of the Event object itself (`<object>.<hex>`), so until now the object could not be
+  grouped or filtered on, even though `k8s.kind` described it. `k8s.name` is unchanged.
+- **`event.action`** (what was attempted regarding the object) and
+  **`event.reporting_instance`** (the ID of the reporting controller instance, falling back
+  to the reporting node name for recorders that only report one). Both are present only when
+  the cluster reports them — `events.k8s.io/v1` recorders fill them in, older ones often do
+  not — and empty values are omitted rather than written as empty fields.
+
+### Changed
+- `kent_events_filtered_total` now counts every filter, not just the namespace ones
+  (metric name and type are unchanged).
+
+### Fixed
+- On the `core/v1` path, `event.source` was empty for events recorded through
+  `events.k8s.io/v1`, which name their reporter in `reportingComponent` and leave the
+  legacy `source` empty; it now falls back to that field, matching what the
+  `events.k8s.io/v1` path has always reported.
+
+---
+
+## [0.3.1] – 2026-08-10
+
 ### Added
 - Helm chart 0.3.1: a ClusterIP Service in front of the metrics port, and an optional
   `ServiceMonitor` (`serviceMonitor.enabled`, off by default since the Prometheus Operator

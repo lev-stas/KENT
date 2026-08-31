@@ -22,7 +22,7 @@ var (
 
 	EventsFiltered = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "kent_events_filtered_total",
-		Help: "Events skipped by namespace include/exclude filters.",
+		Help: "Events skipped by the configured filters (namespace, type, kind, reason).",
 	})
 
 	EventsDeduplicated = promauto.NewCounter(prometheus.CounterOpts{

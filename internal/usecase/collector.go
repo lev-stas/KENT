@@ -124,14 +124,30 @@ func (c *Collector) Run(ctx context.Context) error {
 }
 
 func convertEventToLogEntry(e *domain.Event) (*domain.LogEntry, error) {
-	fields := map[string]string{
-		"k8s.namespace": e.Namespace(),
-		"k8s.name":      e.Name(),
-		"k8s.kind":      e.Object().Kind,
-		"event.reason":  e.Reason(),
-		"event.type":    e.Type(),
-		"event.source":  e.Source(),
-		"event.count":   strconv.FormatInt(int64(e.Count()), 10),
+	// k8s.name is the name of the Event object itself ("<object>.<hex>"),
+	// kept as is for existing queries; k8s.object.name is the involved
+	// object, which is what k8s.kind describes.
+	// Sized for the two optional fields below, so filling them in does not
+	// grow the map on every event of a cluster that reports them.
+	fields := make(map[string]string, 10)
+
+	fields["k8s.namespace"] = e.Namespace()
+	fields["k8s.name"] = e.Name()
+	fields["k8s.object.name"] = e.Object().Name
+	fields["k8s.kind"] = e.Object().Kind
+	fields["event.reason"] = e.Reason()
+	fields["event.type"] = e.Type()
+	fields["event.source"] = e.Source()
+	fields["event.count"] = strconv.FormatInt(int64(e.Count()), 10)
+
+	// Unlike the fields above, these two exist only in newer event APIs and
+	// are left empty by legacy recorders; omit them rather than write an
+	// empty field into every record on such clusters.
+	if action := e.Action(); action != "" {
+		fields["event.action"] = action
+	}
+	if instance := e.ReportingInstance(); instance != "" {
+		fields["event.reporting_instance"] = instance
 	}
 
 	level := mapEventTypeToLevel(e.Type())
