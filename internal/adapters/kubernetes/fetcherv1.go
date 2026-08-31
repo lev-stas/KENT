@@ -21,23 +21,21 @@ import (
 )
 
 type FetcherV1 struct {
-	client    kubernetes.Interface
-	logger    Logger
-	includeNS map[string]struct{}
-	excludeNS map[string]struct{}
-	ready     atomic.Bool
+	client kubernetes.Interface
+	logger Logger
+	filter domain.EventFilter
+	ready  atomic.Bool
 }
 
 func (f *FetcherV1) Ready() bool {
 	return f.ready.Load()
 }
 
-func NewFetcherV1(logger Logger, include []string, exclude []string, client kubernetes.Interface) (*FetcherV1, error) {
+func NewFetcherV1(logger Logger, filter domain.EventFilter, client kubernetes.Interface) (*FetcherV1, error) {
 	return &FetcherV1{
-		client:    client,
-		logger:    logger,
-		includeNS: toSet(include),
-		excludeNS: toSet(exclude),
+		client: client,
+		logger: logger,
+		filter: filter,
 	}, nil
 
 }
@@ -59,8 +57,7 @@ func (f *FetcherV1) Stream(ctx context.Context, out chan<- *domain.Event) error 
 			}
 			return mapK8sEventV1ToDomain(k8sEvent)
 		},
-		includeNS: f.includeNS,
-		excludeNS: f.excludeNS,
+		filter: f.filter,
 	}
 
 	return session.run(ctx, out)
@@ -73,22 +70,30 @@ func mapK8sEventV1ToDomain(e *eventv1.Event) (*domain.Event, error) {
 		Namespace: e.Regarding.Namespace,
 	}
 
-	eventTime := extractEventTime(e)
-	lastTime := extractLastTime(e)
+	return domain.NewEvent(domain.EventInput{
+		UID:               string(e.UID),
+		Name:              e.Name,
+		Namespace:         e.Namespace,
+		Reason:            e.Reason,
+		Message:           e.Note,
+		Type:              e.Type,
+		Object:            obj,
+		Source:            e.ReportingController,
+		Action:            e.Action,
+		ReportingInstance: extractReportingInstance(e),
+		EventTime:         extractEventTime(e),
+		LastTimestamp:     extractLastTime(e),
+		Count:             safeCount(e),
+	})
+}
 
-	return domain.NewEvent(
-		string(e.UID),
-		e.Name,
-		e.Namespace,
-		e.Reason,
-		e.Note,
-		e.Type,
-		obj,
-		e.ReportingController,
-		eventTime,
-		lastTime,
-		safeCount(e),
-	)
+// extractReportingInstance falls back to the deprecated source host: events
+// mirrored from core/v1 recorders carry the reporting node only there.
+func extractReportingInstance(e *eventv1.Event) string {
+	if e.ReportingInstance != "" {
+		return e.ReportingInstance
+	}
+	return e.DeprecatedSource.Host
 }
 
 func safeCount(e *eventv1.Event) int32 {

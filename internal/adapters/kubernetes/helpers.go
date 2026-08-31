@@ -8,11 +8,3 @@ func timePtr(t time.Time) *time.Time {
 	}
 	return &t
 }
-
-func toSet(list []string) map[string]struct{} {
-	set := make(map[string]struct{}, len(list))
-	for _, v := range list {
-		set[v] = struct{}{}
-	}
-	return set
-}

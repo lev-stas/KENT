@@ -29,9 +29,10 @@ type watchSession struct {
 	startWatch func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error)
 	// mapEvent converts a watch object to a domain event; (nil, nil) means
 	// the object is not an event of the watched type and must be skipped.
-	mapEvent  func(obj runtime.Object) (*domain.Event, error)
-	includeNS map[string]struct{}
-	excludeNS map[string]struct{}
+	mapEvent func(obj runtime.Object) (*domain.Event, error)
+	// filter drops events the operator is not interested in. Its zero value
+	// exports everything.
+	filter domain.EventFilter
 
 	resourceVersion string
 	initialBackoff  time.Duration
@@ -150,16 +151,7 @@ func (s *watchSession) consume(ctx context.Context, watcher watch.Interface, out
 				"type", domainEvent.Type(),
 			)
 
-			ns := domainEvent.Namespace()
-
-			if len(s.includeNS) > 0 {
-				if _, ok := s.includeNS[ns]; !ok {
-					metrics.EventsFiltered.Inc()
-					continue
-				}
-			}
-
-			if _, ok := s.excludeNS[ns]; ok {
+			if !s.filter.Allow(domainEvent) {
 				metrics.EventsFiltered.Inc()
 				continue
 			}

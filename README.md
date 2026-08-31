@@ -26,6 +26,7 @@ Most Kubernetes event exporters (such as `kubernetes-event-exporter`) aim to be 
 ## Features
 
 - Collects Kubernetes events cluster-wide or from selected namespaces (`include_namespaces` / `exclude_namespaces`)
+- Flat filters — keep only the event types you care about, restrict to specific object kinds, and match or drop reasons with a regexp; no routing tree
 - Supports both the `events.k8s.io/v1` API and legacy `core/v1` events, with automatic API detection per cluster
 - Exports events to VictoriaLogs via the JSON lines (`/insert/jsonline`) API, with configurable batching (`batchSize`, `flushTime`)
 - Delivery reliability: exponential-backoff retries on transient failures (network, 429, 5xx), watch resume from the last `resourceVersion`, deduplication of re-delivered events, full pipeline drain on graceful shutdown; when VictoriaLogs is down, KENT applies backpressure instead of dropping events
@@ -66,6 +67,10 @@ All options live in the Helm chart's `values.yaml`:
 |---|---|---|
 | `config.kubernetes.include_namespaces` | `[]` (all) | Export events only from these namespaces |
 | `config.kubernetes.exclude_namespaces` | `[]` | Skip events from these namespaces |
+| `config.kubernetes.include_event_types` | `[]` (all) | Export only these event types (`Normal`, `Warning`); case-insensitive |
+| `config.kubernetes.include_kinds` | `[]` (all) | Export only events about these object kinds (`Pod`, `Node`, …); case-insensitive |
+| `config.kubernetes.include_reasons` | `""` (all) | Export only reasons matching this RE2 pattern |
+| `config.kubernetes.exclude_reasons` | `""` (none) | Drop reasons matching this RE2 pattern |
 | `config.victorialogs.enabled` | `true` | Enable the VictoriaLogs exporter |
 | `config.victorialogs.endpoint` | — | VictoriaLogs base URL |
 | `config.victorialogs.clusterID` | — | Cluster name added to every event; also a stream field |
@@ -84,6 +89,28 @@ All options live in the Helm chart's `values.yaml`:
 | `serviceMonitor.interval` / `scrapeTimeout` | `60s` / `58s` | Scrape timing |
 | `serviceMonitor.additionalLabels` | `{}` | Extra labels on the `ServiceMonitor`, e.g. `release: kube-prometheus-stack` |
 
+### Filtering
+
+Every filter is optional, and an empty one imposes no restriction: with the defaults KENT exports everything. An event is exported when it passes **all** configured rules; `exclude_*` wins over `include_*` when both match. Reason patterns are unanchored [RE2](https://github.com/google/re2/wiki/Syntax) — use `^…$` for an exact match, `(?i)` for case-insensitive matching. Invalid patterns fail at startup rather than silently dropping events, and the effective filter is logged when the exporter starts.
+
+```yaml
+config:
+  kubernetes:
+    exclude_namespaces: ["kube-system"]
+    # Only problems, and only about workloads
+    include_event_types: ["Warning"]
+    include_kinds: ["Pod", "Node"]
+    # Routine lifecycle noise is not worth storing
+    exclude_reasons: "^(Pulled|Created|Started|Scheduled)$"
+```
+
+Go's regexp engine has no negative lookahead, which is why reasons take two keys: `include_reasons` expresses "only these", `exclude_reasons` expresses "everything but these".
+
+Two things to know before combining rules:
+
+- The namespace rules match the namespace of the **Event object**, while `include_kinds` matches the object the event is **about**. Events about cluster-scoped objects (`Node`, `PersistentVolume`, …) are recorded in `default`, so `include_kinds: ["Node"]` needs a namespace rule that admits `default` — an `exclude_namespaces: ["default"]` would drop every Node event.
+- An event whose type is unset matches no `include_event_types` entry, so listing both `Normal` and `Warning` is not identical to leaving the key empty.
+
 ## Observability
 
 KENT exposes Prometheus metrics on the health port (`:8080/metrics`), ready to be scraped by vmagent or Prometheus:
@@ -91,6 +118,14 @@ KENT exposes Prometheus metrics on the health port (`:8080/metrics`), ready to b
 - `kent_events_received_total`, `kent_events_filtered_total`, `kent_events_deduplicated_total`
 - `kent_events_sent_total{writer}`, `kent_events_dropped_total{writer,reason}`, `kent_send_errors_total{writer}`
 - `kent_send_queue_length{writer}`, `kent_batch_size` (histogram), `kent_watch_reconnects_total`
+
+`kent_events_filtered_total` counts every filter rule together, so it says how much is being dropped but not which rule dropped it. A filter that is valid but matches nothing looks exactly like a quiet cluster, so it is worth alerting on the ratio:
+
+```
+rate(kent_events_filtered_total[15m]) / rate(kent_events_received_total[15m]) > 0.99
+```
+
+The rules actually in force are logged once at startup, under `app: event filter configured`.
 
 The chart always creates a ClusterIP Service in front of that port, and can also create a `ServiceMonitor` for the Prometheus Operator (the VictoriaMetrics operator converts these objects too). It is disabled by default, because the CRD is not present in every cluster:
 
@@ -106,7 +141,14 @@ serviceMonitor:
 
 Each Kubernetes event becomes a log record with these fields:
 
-`_time`, `_msg` (event message), `level`, `clusterID`, `k8s.namespace`, `k8s.name`, `k8s.kind`, `event.reason`, `event.type`, `event.source`, `event.count` — plus anything you add via `extraFields`.
+`_time`, `_msg` (event message), `level`, `clusterID`, `k8s.namespace`, `k8s.name`, `k8s.object.name`, `k8s.kind`, `event.reason`, `event.type`, `event.source`, `event.count` — plus anything you add via `extraFields`.
+
+Two more fields are present only when the cluster reports them:
+
+- `event.action` — what was attempted regarding the object; `events.k8s.io/v1` recorders set it, older ones usually leave it empty.
+- `event.reporting_instance` — the ID of the controller instance that reported the event (`kubelet-xyzf`). For recorders that report only a node, the node name is used instead, which is what kubelet's own events carry.
+
+`k8s.name` is the name of the Event object itself — `<object>.<hex>`, the way `kubectl get events` shows it — while `k8s.object.name` and `k8s.kind` describe the object the event is about. Group and filter on `k8s.object.name`.
 
 Query them in VictoriaLogs with [LogsQL](https://docs.victoriametrics.com/victorialogs/logsql/):
 
@@ -116,6 +158,12 @@ _time:1h {clusterID="k8s-prod", k8s.namespace="monitoring"} event.type:Warning
 
 # Why pods are not scheduling
 _time:24h {clusterID="k8s-prod"} event.reason:FailedScheduling
+
+# Everything that happened to one pod
+_time:24h {clusterID="k8s-prod"} k8s.object.name:"harbor-registry-nginx-5d6f45dc5-68mcq"
+
+# Noisiest objects in the cluster
+_time:24h {clusterID="k8s-prod"} event.type:Warning | stats by (k8s.kind, k8s.object.name) count() events | sort by (events) desc | limit 10
 
 # Top event reasons across the cluster
 _time:24h {clusterID="k8s-prod"} | stats by (event.reason) count() events | sort by (events) desc | limit 10

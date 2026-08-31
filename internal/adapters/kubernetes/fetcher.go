@@ -27,23 +27,21 @@ type Logger interface {
 }
 
 type Fetcher struct {
-	client    kubernetes.Interface
-	logger    Logger
-	includeNS map[string]struct{}
-	excludeNS map[string]struct{}
-	ready     atomic.Bool
+	client kubernetes.Interface
+	logger Logger
+	filter domain.EventFilter
+	ready  atomic.Bool
 }
 
 func (f *Fetcher) Ready() bool {
 	return f.ready.Load()
 }
 
-func NewFetcher(logger Logger, include []string, exclude []string, client kubernetes.Interface) (*Fetcher, error) {
+func NewFetcher(logger Logger, filter domain.EventFilter, client kubernetes.Interface) (*Fetcher, error) {
 	return &Fetcher{
-		client:    client,
-		logger:    logger,
-		includeNS: toSet(include),
-		excludeNS: toSet(exclude),
+		client: client,
+		logger: logger,
+		filter: filter,
 	}, nil
 }
 
@@ -64,8 +62,7 @@ func (f *Fetcher) Stream(ctx context.Context, out chan<- *domain.Event) error {
 			}
 			return mapK8sEventToDomain(k8sEvent)
 		},
-		includeNS: f.includeNS,
-		excludeNS: f.excludeNS,
+		filter: f.filter,
 	}
 
 	return session.run(ctx, out)
@@ -79,22 +76,41 @@ func mapK8sEventToDomain(e *corev1.Event) (*domain.Event, error) {
 		Namespace: e.InvolvedObject.Namespace,
 	}
 
-	eventTime := extractCoreEventTime(e)
-	lastTime := extractCoreLastTime(e)
+	return domain.NewEvent(domain.EventInput{
+		UID:               string(e.UID),
+		Name:              e.Name,
+		Namespace:         e.Namespace,
+		Reason:            e.Reason,
+		Message:           e.Message,
+		Type:              e.Type,
+		Object:            obj,
+		Source:            extractCoreSource(e),
+		Action:            e.Action,
+		ReportingInstance: extractCoreReportingInstance(e),
+		EventTime:         extractCoreEventTime(e),
+		LastTimestamp:     extractCoreLastTime(e),
+		Count:             safeCoreCount(e),
+	})
+}
 
-	return domain.NewEvent(
-		string(e.UID),
-		e.Name,
-		e.Namespace,
-		e.Reason,
-		e.Message,
-		e.Type,
-		obj,
-		e.Source.Component,
-		eventTime,
-		lastTime,
-		safeCoreCount(e),
-	)
+// extractCoreReportingInstance prefers the events/v1-style field; legacy
+// recorders leave it empty and name the reporting node in Source.Host.
+func extractCoreReportingInstance(e *corev1.Event) string {
+	if e.ReportingInstance != "" {
+		return e.ReportingInstance
+	}
+	return e.Source.Host
+}
+
+// extractCoreSource mirrors the fallback in the other direction: an event
+// recorded through events.k8s.io/v1 and read back through core/v1 carries the
+// reporter in ReportingController and leaves Source empty, so without this the
+// core/v1 path reports no source at all for such events.
+func extractCoreSource(e *corev1.Event) string {
+	if e.Source.Component != "" {
+		return e.Source.Component
+	}
+	return e.ReportingController
 }
 
 // Events recorded through events.k8s.io/v1 recorders surface via core/v1 with

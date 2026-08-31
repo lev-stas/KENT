@@ -17,6 +17,10 @@ type Config struct {
 	Kubernetes struct {
 		IncludeNamespaces []string `yaml:"include_namespaces" env:"K8S_INCLUDE_NAMESPACES" env-separator:","`
 		ExcludeNamespaces []string `yaml:"exclude_namespaces" env:"K8S_EXCLUDE_NAMESPACES" env-separator:","`
+		IncludeEventTypes []string `yaml:"include_event_types" env:"K8S_INCLUDE_EVENT_TYPES" env-separator:","`
+		IncludeKinds      []string `yaml:"include_kinds" env:"K8S_INCLUDE_KINDS" env-separator:","`
+		IncludeReasons    string   `yaml:"include_reasons" env:"K8S_INCLUDE_REASONS"`
+		ExcludeReasons    string   `yaml:"exclude_reasons" env:"K8S_EXCLUDE_REASONS"`
 	} `yaml:"kubernetes"`
 	VictoriaLogs struct {
 		Enabled      bool              `yaml:"enabled" env:"VL_ENABLED"`
